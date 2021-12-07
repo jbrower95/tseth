@@ -99,6 +99,11 @@ function processClass(clzName: string, clz: ts.ClassDeclaration, lines: LineWrit
           lines.push(";");
           break;
         case ts.SyntaxKind.Constructor:
+          const cstr = <ts.ConstructorDeclaration>member;
+          const decl = getMethodDeclaration("constructor", cstr.parameters, null);
+          lines.pushLine(decl);
+          transpileFnBody(cstr.body, lines);
+          lines.pushLine("}");
           break;
         default:
           lines.pushLine(`<classLevel id=${member.kind} />`);
@@ -135,29 +140,21 @@ function getType(t: ts.TypeNode): string {
   throw new Error("Unknown type: " + t.kind);
 }
 
-function getMethodDeclaration(meth: ts.MethodDeclaration): string {
-    const actualParams = meth.parameters;
-    let methName: string = <string>(<ts.Identifier>meth.name).escapedText;
-    if (!methName) {
-      throw "Invalid method processed.";
-    }
-    const isPublic = methName[0] != "#";
+function getMethodDeclaration(name: string, params: ts.NodeArray<ts.ParameterDeclaration>, returnType: ts.TypeNode | null): string {
+    const isPublic = name[0] != "#";
     if (!isPublic) {
-      methName = methName.substring(1);
+      name = name.substring(1);
     }
 
-    const params = [];
-    for (let p of actualParams) {
+    const renderedParams = [];
+    for (let p of params) {
       const type = getType(p.type);
       const name = (<ts.Identifier>p.name).text;
-      params.push(`${type} ${name}`);
+      renderedParams.push(`${type} ${name}`);
     }
-
-    const isConstructor = methName == "constructor";
-    const returnStmt = isConstructor ? "" : (
-      meth.type ? ` returns (${getType(meth.type)})` : ''
-    );
-    return `${isConstructor ? '' : 'function '}${methName}(${params.join(',')}) ${isPublic ? "public" : "private"}${returnStmt} {`;
+    const isConstructor = name == "constructor";
+    const returnStmt = returnType ? ` returns (${getType(returnType)})` : '';
+    return `${isConstructor ? '' : 'function '}${name}(${params.join(',')}) ${isPublic ? "public" : "private"}${returnStmt} {`;
 }
 
 function transpileToken(tk: ts.BinaryOperatorToken, lines: LineWriter) {
@@ -236,6 +233,9 @@ function transpileExpression(expr: ts.Expression, lines: LineWriter) {
   }
 
   switch (expr.kind) {
+    case ts.SyntaxKind.SuperKeyword:
+      lines.push('super');
+      break;
     case ts.SyntaxKind.ThisKeyword:
       lines.push("this");
       break;
@@ -393,19 +393,20 @@ function transpileLine(stmt: ts.Statement, lines: LineWriter) {
   transpileStatement(stmt, lines);
 }
 
-function transpileMethod(clz: ts.ClassDeclaration, meth: ts.MethodDeclaration, lines: LineWriter): void {
-  const decl = getMethodDeclaration(meth);
-  const decorators = meth.decorators;
-  if (decorators) {}
-
-  lines.pushLine(decl);
+function transpileFnBody(body: ts.FunctionBody, lines: LineWriter) {
   lines.tabbed(() => {
-    if (meth.body) {
-      for (let stmt of meth.body.statements) {
+    if (body) {
+      for (let stmt of body.statements) {
         transpileLine(stmt, lines);
       }
     }
   });
+}
+
+function transpileMethod(clz: ts.ClassDeclaration, meth: ts.MethodDeclaration, lines: LineWriter): void {
+  const decl = getMethodDeclaration((<ts.Identifier>meth.name).text, meth.parameters, meth.type);
+  lines.pushLine(decl);
+  transpileFnBody(meth.body, lines);
   lines.pushLine('}')
 }
 
